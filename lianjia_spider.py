@@ -4,12 +4,13 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import urllib
 from PIL import Image
+import os
 
 
 SPIDER_REQUEST_ERR = '爬虫请求失败!'
 #搜索结果中的图片的保存路径
-SEARCH_PIC_PATH = 'C:\\Users\\Python\\Desktop\zufang\\pic\\'
-DETAIL_PIC_PATH = 'C:\\Users\\Python\\Desktop\zufang\\detail\\'
+SEARCH_PIC_PATH = 'C:\\Users\\Python\\Desktop\\zufang\\pic\\'
+DETAIL_PIC_PATH = 'C:\\Users\\Python\\Desktop\\zufang\\detail\\'
 
 class LianjiaSpider():
     def __init__(self,category,city,page_num,house_num_per_page):
@@ -92,20 +93,15 @@ class LianjiaSpider():
         text = self.get_response(url)
         self.get_pic_url_from_detail_page(text)
 
-
     def save_pic(self,url,path):
         data = urllib.request.urlopen(url).read()
         with open(path,"wb") as f:
             f.write(data)
 
-    def parse_ershoufang_html(self,url):
+    def parse_ershoufang_html(self,res):
         '''
         二手房和租房的HTML结构不同,所以写成两个方法,这个是二手房的解析
         '''
-        try:
-            res = self.get_response(url)
-        except AssertionError as err:
-            print(err)
         info = {}
         soup = BeautifulSoup(res, 'lxml')
         info['标题'] = soup.select('.main')[0].text
@@ -117,28 +113,23 @@ class LianjiaSpider():
         info['建造时间'] = soup.select('.subInfo')[2].text
         info['小区名称'] = soup.select('.info')[0].text
         info['所在区域'] = soup.select('.info a')[0].text + ':' + soup.select('.info a')[1].text
-        info['链家编号'] = str(url)[33:].rsplit('.html')[0].lstrip('/')
-
+        info['链家编号'] = soup.select('.btnContainer')[0].get('data-lj_action_resblock_id')
         return info
     
-    def parse_zufang_url(self,url):
+    def parse_zufang_url(self,res):
         '''
         租房HTML的解析
         '''
-        res = requests.get(url)
-        if res.status_code == 200:
-            info = {}
-            soup = BeautifulSoup(res.text, 'lxml')
-            
-            info['标题'] = soup.select('.main')[0].text
-            info['总价'] = soup.select('.total')[0].text + '万'
-            info['每平方售价'] = soup.select('.unitPriceValue')[0].text
-            info['建造时间'] = soup.select('.subInfo')[2].text
-            info['小区名称'] = soup.select('.info')[0].text
-            info['所在区域'] = soup.select('.info a')[0].text + ':' + soup.select('.info a')[1].text
-            info['链家编号'] = str(url)[33:].rsplit('.html')[0].lstrip('/')
-
-            return info
+        info = {}
+        soup = BeautifulSoup(res, 'lxml')
+        info['标题'] = soup.select('.main')[0].text
+        info['总价'] = soup.select('.total')[0].text + '万'
+        info['每平方售价'] = soup.select('.unitPriceValue')[0].text
+        info['建造时间'] = soup.select('.subInfo')[2].text
+        info['小区名称'] = soup.select('.info')[0].text
+        info['所在区域'] = soup.select('.info a')[0].text + ':' + soup.select('.info a')[1].text
+        info['链家编号'] = str(url)[33:].rsplit('.html')[0].lstrip('/')
+        return info
 
     def save_to_csv(self,info):
         df = pd.DataFrame(info)
@@ -164,12 +155,21 @@ class LianjiaSpider():
 
             #获取每个房子的基本信息并写入到csv文件
             for house_url in house_list:
-                info = self.parse_ershoufang_html(house_url)
+                try:
+                    html_detail = self.get_response(house_url)
+                except AssertionError as err:
+                    print('爬取详情页面失败')
+                info = self.parse_ershoufang_html(html_detail)
+                #把房子基本信息写入到一个字典列表中
                 house_info_list.append(info)
-            
-            # 获取图片url并保存图片,图片名字以房子的id命名,此处的图片用在二手房搜索结果中展示
-            for pic_name,pic_url in self.get_pic_url_from_detail_page(html_str).items():
-                self.save_pic(pic_url,SEARCH_PIC_PATH+'{}.jpg'.format(pic_id))
+
+                #为每个房子创建不同的文件夹用来分类存放图片
+                os.mkdir(SEARCH_PIC_PATH+'{}'.format(info['链家编号']))
+                #保存房子的图片
+                for pic_name,pic_url in self.get_pic_url_from_detail_page(html_detail).items():
+                    path = SEARCH_PIC_PATH + info['链家编号'] + '\\'+'{}_{}.jpg'.format(info['链家编号'],pic_name)
+                    print('path:',path)
+                    self.save_pic(pic_url,path)
 
         self.save_to_csv(house_info_list)
             
@@ -177,7 +177,6 @@ class LianjiaSpider():
 if __name__ == '__main__':
     lianjia_spider = LianjiaSpider('ershoufang','sz',1,30)
     lianjia_spider.run()
-    lianjia_spider.test()
 
 
 

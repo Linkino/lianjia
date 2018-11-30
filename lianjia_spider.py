@@ -48,11 +48,25 @@ class LianjiaSpider():
         '''
         获取每一个房子的url
         '''
-        pattern = r'https://{}.lianjia.com/{}/{}.html'.format(self.city,self.category,'[0-9]+')
-        url_list = re.findall(pattern,text)
-        print('爬取的所有二手房源链接数量为:',len(url_list))
-        #因为整个页面中出现了四次url,所以剔除重复的
-        return [url_list[i] for i in range(len(url_list)) if i%2==0][0:30]
+        url_list = []
+        # pattern = r'https://{}.lianjia.com/{}/{}.html'.format(self.city,self.category,'[0-9]+')
+        # url_list = re.findall(pattern,text)
+        # print('爬取的所有二手房源链接数量为:',len(url_list))
+        # #因为整个页面中出现了四次url,所以剔除重复的
+        # return [url_list[i] for i in range(len(url_list)) if i%2==0][0:30]
+
+        soup = BeautifulSoup(text,'lxml')
+        if self.category == 'zufang':
+            house_code_list = soup.select(".house-lst > li")
+        elif self.category == 'ershoufang':
+            house_code_list = soup.select("a[class='noresultRecommend img ']")
+        for code in house_code_list:
+            url = r'https://{}.lianjia.com/{}/{}.html'.format(self.city,self.category,code.get('data-housecode'))
+            url_list.append(url)
+        print(url_list)
+        return url_list
+
+        
 
     def get_pic_url_from_search_result(self,text):
         '''
@@ -69,8 +83,12 @@ class LianjiaSpider():
         从详情页获取房子的详细图片,包括客厅,卧室等,而且图片数量并不一定
         '''
         soup = BeautifulSoup(text,'lxml')
-        #获取全部关于房子的图片,通过类名smallpic的子类标签li进行匹配
-        total_pic = soup.select("ul[class='smallpic'] > li")
+        #获取全部关于房子的图片
+        if self.category == 'ershoufang':
+            total_pic = soup.select("ul[class='smallpic'] > li")
+        elif self.category == 'zufang':
+            total_pic = soup.select("div[class='thumbnail'] > ul > li")
+
         pic_name = [content.get('data-desc') for content in total_pic]
         pic_url = [content.get('data-src') for content in total_pic]
         return dict(zip(pic_name,pic_url))
@@ -89,9 +107,16 @@ class LianjiaSpider():
         out.save(outfile)
 
     def test(self):
-        url = 'https://sz.lianjia.com/ershoufang/105101414350.html'
+        url = 'https://sz.lianjia.com/ershoufang/'
         text = self.get_response(url)
-        self.get_pic_url_from_detail_page(text)
+        house_code_list = []
+        
+        soup = BeautifulSoup(text,'lxml')
+        house_code_list = soup.select("a[class='noresultRecommend img ']")
+        #print('数量为:',len(house_list))
+        for code in house_code_list:
+           print(code.get('data-housecode'))
+        #print(house_code_list)
 
     def save_pic(self,url,path):
         data = urllib.request.urlopen(url).read()
@@ -116,19 +141,18 @@ class LianjiaSpider():
         info['链家编号'] = soup.select('.btnContainer')[0].get('data-lj_action_resblock_id')
         return info
     
-    def parse_zufang_url(self,res):
+    def parse_zufang_html(self,res):
         '''
         租房HTML的解析
         '''
         info = {}
         soup = BeautifulSoup(res, 'lxml')
         info['标题'] = soup.select('.main')[0].text
-        info['总价'] = soup.select('.total')[0].text + '万'
-        info['每平方售价'] = soup.select('.unitPriceValue')[0].text
-        info['建造时间'] = soup.select('.subInfo')[2].text
-        info['小区名称'] = soup.select('.info')[0].text
-        info['所在区域'] = soup.select('.info a')[0].text + ':' + soup.select('.info a')[1].text
-        info['链家编号'] = str(url)[33:].rsplit('.html')[0].lstrip('/')
+        info['价格'] = soup.select('.total')[0].text + '元/月'
+        info['面积'] = soup.select('.lf')[0].text.split('：')[1]
+        info['户型'] = soup.select('.lf')[1].text.split('：')[1]
+        info['楼层'] = soup.select('.lf')[2].text.split('：')[1]
+        info['链家编号'] = soup.select('.houseNum')[0].text.split('：')[1]
         return info
 
     def save_to_csv(self,info):
@@ -159,7 +183,10 @@ class LianjiaSpider():
                     html_detail = self.get_response(house_url)
                 except AssertionError as err:
                     print('爬取详情页面失败')
-                info = self.parse_ershoufang_html(html_detail)
+                if self.category == 'ershoufang':
+                    info = self.parse_ershoufang_html(html_detail)
+                elif self.category == 'zufang':
+                    info = self.parse_zufang_html(html_detail)
                 #把房子基本信息写入到一个字典列表中
                 house_info_list.append(info)
 
@@ -172,11 +199,15 @@ class LianjiaSpider():
                     self.save_pic(pic_url,path)
 
         self.save_to_csv(house_info_list)
-            
 
 if __name__ == '__main__':
-    lianjia_spider = LianjiaSpider('ershoufang','sz',1,30)
-    lianjia_spider.run()
+    ershoufang_spider = LianjiaSpider('ershoufang','sz',1,30)
+    ershoufang_spider.run()
+    
+    # zufang_spider = LianjiaSpider('zufang','sz',1,30)
+    # zufang_spider.run()
+
+    
 
 
 

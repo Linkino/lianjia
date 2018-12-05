@@ -5,6 +5,7 @@ import pandas as pd
 import urllib
 from PIL import Image
 import os
+from multiprocessing.dummy import Pool as ThreadPool
 
 
 SPIDER_REQUEST_ERR = '爬虫请求失败!'
@@ -25,7 +26,7 @@ class LianjiaSpider():
         self.page_num = page_num
         self.house_num_per_page = house_num_per_page
         self.url_temp = 'https://' + city+ '.lianjia.com/'+category+'/pg{}'
-        #self.headers = {'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.102 Safari/537.36'}
+        self.headers = {'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.102 Safari/537.36'}
     
     def generate_url_list(self):
         '''
@@ -35,7 +36,8 @@ class LianjiaSpider():
 
     def get_response(self,url):#发送请求,获取响应
         print(url)
-        response = requests.get(url,'lxml')
+        response = requests.get(url,headers = self.headers,timeout=30)
+        print(response.status_code)
         assert response.status_code == 200,SPIDER_REQUEST_ERR    
         return response.content.decode()
 
@@ -118,10 +120,13 @@ class LianjiaSpider():
            print(code.get('data-housecode'))
         #print(house_code_list)
 
-    def save_pic(self,url,path):
+    def download_pic(self,url,path):
         data = urllib.request.urlopen(url).read()
         with open(path,"wb") as f:
             f.write(data)
+    
+    def gen_folder_name(self,pic_code,name):
+        return SEARCH_PIC_PATH + pic_code + '\\'+'{}_{}.jpg'.format(pic_code,name)
 
     def parse_ershoufang_html(self,res):
         '''
@@ -158,50 +163,71 @@ class LianjiaSpider():
     def save_to_csv(self,info):
         df = pd.DataFrame(info)
         #df.set_index('链家编号')
-        df.to_csv('info.csv',encoding='utf_8_sig')
+        df.to_csv('{}.csv'.format(self.category),mode='a',encoding='utf_8_sig')
 
     def save_to_xlsx(self,info):
         pass
+    
+    def select_parser(self,html_text):
+        info = {}
+        if self.category == 'ershoufang':
+            info = self.parse_ershoufang_html(html_text)
+        elif self.category == 'zufang':
+            info = self.parse_zufang_html(html_text)
+        return info
+    
+    def get_house_info(self,page_url):
+        '''
+        从一页中获取到所有房子的url并分析保存,方便进行多线程爬取
+        '''
+        house_info_list = []
+        try :
+            html_str = self.get_response(page_url)
+        except AssertionError as err:
+            print(err)
+            return
+        #获取所有房子的url,放到house_url中
+        house_list = self.get_house_url(html_str)
+
+        #获取每个房子的基本信息并写入到csv文件
+        for house_url in house_list:
+            try:
+                html_detail = self.get_response(house_url)
+            except AssertionError as err:
+                print('爬取详情页面失败')
+            info = self.select_parser(html_detail)
+            #把房子基本信息写入到一个字典列表中
+            house_info_list.append(info)
+
+            #为每个房子创建不同的文件夹用来分类存放图片
+            try:
+                os.mkdir(SEARCH_PIC_PATH+'{}'.format(info['链家编号']))
+            except FileExistsError:
+                print('此租户数据已经被抓取!')
+                continue
+            #保存房子的图片
+            for pic_name,pic_url in self.get_pic_url_from_detail_page(html_detail).items():
+                path = self.gen_folder_name(info['链家编号'],pic_name)
+                print(path)
+                self.download_pic(pic_url,path)
+        self.save_to_csv(house_info_list)
+        #return house_info_list
+
 
     def run(self): #实现主要逻辑
-        house_info_list=[]
+        #house_info_list=[]
         #1.构造页面url列表
         url_list = self.generate_url_list()
         print(url_list)
+        pool = ThreadPool(4) #4核电脑
         #2.遍历,发送请求,获取响应
-        for url in url_list:
-            try :
-                html_str = self.get_response(url)
-            except AssertionError as err:
-                print(err)
-            #获取所有房子的url,放到house_url中
-            house_list = self.get_house_url(html_str)
+        pool.map(self.get_house_info, url_list)#多线程工作
+        pool.close()
+        pool.join()
 
-            #获取每个房子的基本信息并写入到csv文件
-            for house_url in house_list:
-                try:
-                    html_detail = self.get_response(house_url)
-                except AssertionError as err:
-                    print('爬取详情页面失败')
-                if self.category == 'ershoufang':
-                    info = self.parse_ershoufang_html(html_detail)
-                elif self.category == 'zufang':
-                    info = self.parse_zufang_html(html_detail)
-                #把房子基本信息写入到一个字典列表中
-                house_info_list.append(info)
-
-                #为每个房子创建不同的文件夹用来分类存放图片
-                os.mkdir(SEARCH_PIC_PATH+'{}'.format(info['链家编号']))
-                #保存房子的图片
-                for pic_name,pic_url in self.get_pic_url_from_detail_page(html_detail).items():
-                    path = SEARCH_PIC_PATH + info['链家编号'] + '\\'+'{}_{}.jpg'.format(info['链家编号'],pic_name)
-                    print('path:',path)
-                    self.save_pic(pic_url,path)
-
-        self.save_to_csv(house_info_list)
 
 if __name__ == '__main__':
-    ershoufang_spider = LianjiaSpider('ershoufang','sz',1,30)
+    ershoufang_spider = LianjiaSpider('ershoufang','sz',30,30)
     ershoufang_spider.run()
     
     # zufang_spider = LianjiaSpider('zufang','sz',1,30)

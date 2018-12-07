@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import requests
 import re
 from bs4 import BeautifulSoup
@@ -6,6 +7,8 @@ import urllib
 from PIL import Image
 import os
 from multiprocessing.dummy import Pool as ThreadPool
+import sys
+
 
 
 SPIDER_REQUEST_ERR = '爬虫请求失败!'
@@ -108,18 +111,6 @@ class LianjiaSpider():
         out = im.resize((x_s,y_s),Image.ANTIALIAS) #resize image with high-quality
         out.save(outfile)
 
-    def test(self):
-        url = 'https://sz.lianjia.com/ershoufang/'
-        text = self.get_response(url)
-        house_code_list = []
-        
-        soup = BeautifulSoup(text,'lxml')
-        house_code_list = soup.select("a[class='noresultRecommend img ']")
-        #print('数量为:',len(house_list))
-        for code in house_code_list:
-           print(code.get('data-housecode'))
-        #print(house_code_list)
-
     def download_pic(self,url,path):
         data = urllib.request.urlopen(url).read()
         with open(path,"wb") as f:
@@ -136,6 +127,7 @@ class LianjiaSpider():
         soup = BeautifulSoup(res, 'lxml')
         info['标题'] = soup.select('.main')[0].text
         info['总价'] = soup.select('.total')[0].text + '万'
+        info['面积'] = soup.select('.mainInfo')[2].text
         info['每平方售价'] = soup.select('.unitPriceValue')[0].text
         info['房间数量'] = soup.select('.mainInfo')[0].text
         info['楼层'] = soup.select('.subInfo')[0].text
@@ -213,6 +205,15 @@ class LianjiaSpider():
         self.save_to_csv(house_info_list)
         #return house_info_list
 
+    def test(self):
+        url = 'https://sz.lianjia.com/ershoufang/105101385718.html'
+        text = self.get_response(url)
+        #house_code_list = []
+        
+        soup = BeautifulSoup(text,'lxml')
+        house_code_list = soup.select('.mainInfo')[2].text
+        #print('数量为:',len(house_list)
+        print(house_code_list)
 
     def run(self): #实现主要逻辑
         #house_info_list=[]
